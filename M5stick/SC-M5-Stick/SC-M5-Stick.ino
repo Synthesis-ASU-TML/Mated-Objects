@@ -30,6 +30,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <OSCMessage.h>
+#include <OSCBundle.h>
 #include <EEPROM.h>
 
 #define UUIDIDX 0
@@ -592,26 +593,34 @@ void HandleDisplay(){
 void HandleNetwork(){
   // Only send data when connected
   if(connected){
+
+    //create and fill the messages
     OSCMessage oscAccXMsg("/acc/x"); // First argument is OSC address
     oscAccXMsg.add((float)accX); // Then append the data
+    OSCMessage oscAccYMsg("/acc/y"); // First argument is OSC address
+    oscAccYMsg.add((float)accY); // Then append the data
+    OSCMessage oscAccZMsg("/acc/z"); // First argument is OSC address
+    oscAccZMsg.add((float)accZ); // Then append the data
+    OSCMessage accRes("/acc/res");
+    accRes.add(aRes);
+    
+    //send the messages
     udp.beginPacket(targetIP,udpPort);
     oscAccXMsg.send(udp); // send the bytes to the SLIP stream
     udp.endPacket(); // mark the end of the OSC Packet
-    oscAccXMsg.empty(); // free space occupied by message
-
-    OSCMessage oscAccYMsg("/acc/y"); // First argument is OSC address
-    oscAccYMsg.add((float)accY); // Then append the data
     udp.beginPacket(targetIP,udpPort);
     oscAccYMsg.send(udp); // send the bytes to the SLIP stream
     udp.endPacket(); // mark the end of the OSC Packet
-    oscAccYMsg.empty(); // free space occupied by message
-
-  OSCMessage oscAccZMsg("/acc/z"); // First argument is OSC address
-    oscAccZMsg.add((float)accZ); // Then append the data
     udp.beginPacket(targetIP,udpPort);
     oscAccZMsg.send(udp); // send the bytes to the SLIP stream
     udp.endPacket(); // mark the end of the OSC Packet
+    udp.beginPacket(targetIP,udpPort);
+    accRes.send(udp);
+    udp.endPacket(); // mark the end of the OSC Packet
+    oscAccXMsg.empty(); // free space occupied by message
+    oscAccYMsg.empty(); // free space occupied by message   
     oscAccZMsg.empty(); // free space occupied by message
+    accRes.empty();
 
 
    OSCMessage oscGyroXMsg("/gyro/x"); // First argument is OSC address
@@ -634,6 +643,13 @@ void HandleNetwork(){
     oscGyroZMsg.send(udp); // send the bytes to the SLIP stream
     udp.endPacket(); // mark the end of the OSC Packet
     oscGyroZMsg.empty(); // free space occupied by message
+
+    OSCMessage gyroRes("/gyro/res");
+    gyroRes.add(gRes);
+    udp.beginPacket(targetIP,udpPort);
+    gyroRes.send(udp);
+    udp.endPacket(); // mark the end of the OSC Packet
+    gyroRes.empty();
 
   //  OSCMessage oscM5AnalogMsg("/m5Analog"); // First argument is OSC address
    // oscM5AnalogMsg.add((int)analogSensorValue); // Then append the data
