@@ -30,7 +30,6 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <OSCMessage.h>
-#include <OSCBundle.h>
 #include <EEPROM.h>
 
 #define UUIDIDX 0
@@ -45,8 +44,8 @@
 const char * networkName = "Network Name";
 const char * networkPswd = "Network Password";
 
-void* tempPWD;
-void* tempUUID;
+void* myPWD;
+void* myUUID;
 
 
 int nonTurboRefreshDelay = 40;
@@ -209,13 +208,19 @@ void readUUID() {
 
   EEPROM.end();
   
-  if(nsize == 0) {
-    tempUUID = NULL;
+  if(nsize == 1) {
+    //fill in default value
+    char* defaultUUID = "No Network";
+    myUUID = malloc(12);
+    memcpy(myUUID, defaultUUID, 11);
+    char* t = (char*)myUUID;
+    t += 11;
+    *t = 0;
     return;
   }
   
-  tempUUID = malloc(sizeof(char) * nsize);
-  memcpy(tempUUID, uid, nsize);
+  myUUID = malloc(sizeof(char) * nsize);
+  memcpy(myUUID, uid, nsize);
   
 }
 
@@ -240,13 +245,15 @@ void readPWD() {
 
   nsize = i + 1;
   
-  if(nsize == 0) {
-    tempPWD = NULL;
+  if(nsize == 1) {
+    char* pwd = "default";
+    myPWD = malloc(8);
+    memcpy(myPWD, pwd, 8);
     return;
   }
 
-  tempPWD = malloc(sizeof(char) * nsize);
-  memcpy(tempPWD, pwd, nsize);
+  myPWD = malloc(sizeof(char) * nsize);
+  memcpy(myPWD, pwd, nsize);
 }
 
 void readIP() {
@@ -354,11 +361,7 @@ void setup() {
   readUUID();
   readPWD();
 
-  if(tempUUID != NULL && tempPWD != NULL) {
-    connectToWiFi((char*)tempUUID, (char*)tempPWD);
-  } else {
-    connectToWiFi(networkName, networkPswd);
-  }
+  connectToWiFi((char*)myUUID, (char*)myPWD);
    
   readIP();
   readTargetPort();
@@ -511,7 +514,7 @@ void displayNetwork() {
   M5.Lcd.setCursor(0,50);
 
   int i = 0;
-  char* uuid = (char*)tempUUID;
+  char* uuid = (char*)myUUID;
   while(uuid[i] != 0) {
     M5.Lcd.print(uuid[i]);
     i++;
@@ -669,23 +672,23 @@ void HandleNetwork(){
 
 void copyPassword(char* buf, int count, int idx){
   if(count > 4) {
-    if(tempPWD != NULL) {
-      free(tempPWD);
+    if(myPWD != NULL) {
+      free(myPWD);
     }
 
     int bsize = count - idx + 1;
     
-    tempPWD = malloc(sizeof(char) * bsize);
+    myPWD = malloc(sizeof(char) * bsize);
 
     char* tmp = buf;
     tmp += idx;
     USE_SERIAL.print("Data Size: ");
     USE_SERIAL.println(sizeof(char) * bsize);
-    memcpy(tempPWD, tmp, (bsize - 1));
-    tmp = (char*)tempPWD + (bsize - 1);
+    memcpy(myPWD, tmp, (bsize - 1));
+    tmp = (char*)myPWD + (bsize - 1);
     *tmp = 0;
     USE_SERIAL.print("New Password: ");
-    USE_SERIAL.print((char*)tempPWD);
+    USE_SERIAL.print((char*)myPWD);
     USE_SERIAL.println();
     
   }
@@ -696,21 +699,21 @@ void copyPassword(char* buf, int count, int idx){
 
 void copyUUID(char* buf, int count, int idx){
   if(count > 4) {
-    if(tempUUID != NULL) {
-      free(tempUUID);
+    if(myUUID != NULL) {
+      free(myUUID);
     }
     int bsize = count - idx + 1;
-    tempUUID = malloc(sizeof(char) * bsize);
+    myUUID = malloc(sizeof(char) * bsize);
 
     char* tmp = buf;
     tmp += idx;
     USE_SERIAL.print("Data Size: ");
     USE_SERIAL.println(sizeof(char) * bsize);
-    memcpy(tempUUID, tmp, (bsize - 1));
-    tmp = (char*)tempUUID + (bsize - 1);
+    memcpy(myUUID, tmp, (bsize - 1));
+    tmp = (char*)myUUID + (bsize - 1);
     *tmp = 0;
     USE_SERIAL.print("New Network: ");
-    USE_SERIAL.print((char*)tempUUID);
+    USE_SERIAL.print((char*)myUUID);
     USE_SERIAL.println();
     
   }
@@ -720,8 +723,8 @@ void copyUUID(char* buf, int count, int idx){
 }
 
 void attemptToConnect() {
-  if(tempPWD != NULL && tempUUID != NULL) {
-    reconnectToWiFi((char*)tempUUID, (char*)tempPWD);
+  if(myPWD != NULL && myUUID != NULL) {
+    reconnectToWiFi((char*)myUUID, (char*)myPWD);
   }
 }
 
@@ -794,17 +797,17 @@ void setLocalPort(char* buf, int count, int idx) {
 }
 
 void storeToEEPROM() {
-  if(tempPWD != NULL && tempUUID != NULL) {
+  if(myPWD != NULL && myUUID != NULL) {
 
     EEPROM.begin(73);
     
     int i = 0;
     int dataIdx = 0;
-    char* myUUID = (char*)tempUUID;
+    char* tUUID = (char*)myUUID;
     
     //store Network Name
-    while(myUUID[i] != 0 && i < 32) {
-      EEPROM.write(dataIdx + i, myUUID[i]);
+    while(tUUID[i] != 0 && i < 32) {
+      EEPROM.write(dataIdx + i, tUUID[i]);
       i++;
     }
     //Clear remaining data field
@@ -816,10 +819,10 @@ void storeToEEPROM() {
     //store Network Password
     i = 0;
     dataIdx = 32;
-    char* myPWD = (char*)tempPWD;
+    char* tPWD = (char*)myPWD;
     
-    while(myPWD[i] != 0 && i < 32) {
-      EEPROM.write(dataIdx + i, myPWD[i]);
+    while(tPWD[i] != 0 && i < 32) {
+      EEPROM.write(dataIdx + i, tPWD[i]);
       i++;
     }
 
