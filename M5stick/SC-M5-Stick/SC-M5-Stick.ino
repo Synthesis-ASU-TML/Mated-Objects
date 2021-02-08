@@ -22,6 +22,7 @@
  *       parameters on the device.
  *     + Added Storage of network configuration parameters into the
  *       EEPROM of the device.
+ *     + Added output of angle data as OSC.
  *    |==============================================================|
  */
 
@@ -32,6 +33,7 @@
 #include <OSCMessage.h>
 #include <EEPROM.h>
 
+//EEPROM data offsets
 #define UUIDIDX 0
 #define PWDIDX 32
 #define IPIDX 64
@@ -40,26 +42,20 @@
 
 
 ////////// User Variables //////////////////////////////////////////////////
-// Be sure to set these for your own WiFi network
-const char * networkName = "Network Name";
-const char * networkPswd = "Network Password";
-
 void* myPWD;
 void* myUUID;
 
 
 int nonTurboRefreshDelay = 40;
-
-//IP address to send UDP data to:
-// either use the ip address of the server or
-// a network broadcast address
-char * udpAddress = "192.168.0.232"; //<- Enter your computer's IP address here
+//default output port
 int udpPort = 8001;
+//default input port
 int localPort = 7500;
-char* targetIP = udpAddress;
+//output IP address
+char* targetIP;
 //Are we currently connected?
 boolean connected = false;
-
+//toggle between data display and network display
 bool dispMode = false;
 
 //The udp library class
@@ -75,9 +71,11 @@ enum imu_type {
 imu_type imuType = MPU6886;
 int16_t accX, accY, accZ;
 int16_t gyroX, gyroY, gyroZ;
+float gX, gY, gZ;
+float pitch, roll, yaw;
 double fXg, fYg, fZg;
 const float alpha = 0.5;
-double pitch, roll, Xg, Yg, Zg;
+double Xg, Yg, Zg;
 float gRes, aRes;
 
 int analogSensorValue;
@@ -85,8 +83,7 @@ int16_t temp = 0;
 double vbat = 0.0;
 int discharge,charge;
 double bat_p = 0.0;
-bool isCharging;
-bool isDischarging;
+
 
 bool turboModeActive = false;
 int screenBrightness = 15; // Range 0->15; Start at max brightness
@@ -180,6 +177,7 @@ void DecideGyroType(){
  
   M5.MPU6886.Init();
   M5.MPU6886.getAccelAdc(&accX,&accY,&accZ);
+  
   if ( !(abs(accX) == 0 && abs(accY) == 0 && abs(accZ) == 0)){
     imuType = MPU6886;
     return;
@@ -210,7 +208,7 @@ void readUUID() {
   
   if(nsize == 1) {
     //fill in default value
-    char* defaultUUID = "No Network";
+    const char* defaultUUID = "No Network";
     myUUID = malloc(12);
     memcpy(myUUID, defaultUUID, 11);
     char* t = (char*)myUUID;
@@ -246,7 +244,7 @@ void readPWD() {
   nsize = i + 1;
   
   if(nsize == 1) {
-    char* pwd = "default";
+    const char* pwd = "default";
     myPWD = malloc(8);
     memcpy(myPWD, pwd, 8);
     return;
@@ -271,7 +269,7 @@ void readIP() {
   if(parts[0] + parts[1] + parts[2] + parts[3] == 0) {
     targetIP = (char*)malloc(sizeof(char) * 11);
     targetIP[10] = 0;
-    char* tempIP = "127.0.0.1";
+    const char* tempIP = "127.0.0.1";
     memcpy(targetIP, tempIP, 10); 
     return;
   }
@@ -350,6 +348,7 @@ void setup() {
   M5.Lcd.setTextSize(1);
   M5.Lcd.setCursor(0, 0);
 
+  M5.Axp.EnableCoulombcounter();
   //init sensor memory locations
   accX = 0;
   accY = 0;
@@ -357,6 +356,12 @@ void setup() {
   gyroX = 0;
   gyroY = 0;
   gyroZ = 0;
+  gX = 0.0;
+  gY = 0.0;
+  gZ = 0.0;
+  pitch = 0.0;
+  roll = 0.0;
+  yaw = 0.0;
 
   readUUID();
   readPWD();
@@ -475,6 +480,7 @@ void HandleSensors(){
   }
   else if (imuType == MPU6886){
     M5.MPU6886.getGyroAdc(&gyroX,&gyroY,&gyroZ);
+    M5.MPU6886.getGyroData(&gX, &gY, &gZ);
     M5.MPU6886.getAccelAdc(&accX,&accY,&accZ);
     M5.MPU6886.getTempAdc(&temp);
     aRes = M5.MPU6886.aRes;
@@ -484,10 +490,7 @@ void HandleSensors(){
     //USE_SERIAL.println("IMU Not Set");
   }
  
-  vbat = M5.Axp.GetVbatData() * 1.1 / 1000;
-  isCharging    = M5.Axp.GetIchargeData() / 2;
-  isDischarging = M5.Axp.GetIdischargeData() / 2;
-  // analogSensorValue = analogRead(sensorIn);
+  vbat = M5.Axp.GetBatVoltage();
  
   //Low Pass Filter
   fXg = accX * alpha + (fXg * (1.0 - alpha));
@@ -495,8 +498,11 @@ void HandleSensors(){
   fZg = accZ * alpha + (fZg * (1.0 - alpha));
 
   //Roll & Pitch Equations
-  roll  = 11+ (atan2(-fYg, fZg)*180.0)/M_PI;
-  pitch = (atan2(fXg, sqrt(fYg*fYg + fZg*fZg))*180.0)/M_PI - 8;
+  //roll  = 11+ (atan2(-fYg, fZg)*180.0)/M_PI;
+  //pitch = (atan2(fXg, sqrt(fYg*fYg + fZg*fZg))*180.0)/M_PI - 8;
+
+  M5.MPU6886.getAhrsData(&pitch, &roll, &yaw);
+  
 }
 
 
@@ -545,9 +551,11 @@ void HandleDisplay(){
   M5.Lcd.print(targetIP);
 
   M5.Lcd.setCursor(0, 10);
-  IPAddress myIP = WiFi.localIP();
-  M5.Lcd.printf("My IP: %i.%i.%i.%i:%i", myIP[0], myIP[1], myIP[2], myIP[3], localPort);
- 
+  M5.Lcd.printf("Output UDP Port: %i", udpPort);
+  /*
+   * IPAddress myIP = WiFi.localIP();
+   * M5.Lcd.printf("My IP: %i.%i.%i.%i:%i", myIP[0], myIP[1], myIP[2], myIP[3], localPort);
+  */
   M5.Lcd.setCursor(0, 20);
   M5.Lcd.println("  X       Y      Z");
   M5.Lcd.setCursor(114, 20);
@@ -562,34 +570,30 @@ void HandleDisplay(){
   }
  
   M5.Lcd.setCursor(0, 30);
-  M5.Lcd.printf("%.2f   %.2f   %.2f    ", ((float) gyroX) * gRes, ((float) gyroY) * gRes,((float) gyroZ) * gRes);
-  M5.Lcd.setCursor(144, 30);
-  M5.Lcd.print("mg");
+  //M5.Lcd.printf("%.2f   %.2f   %.2f    ", ((float) gyroX) * gRes, ((float) gyroY) * gRes,((float) gyroZ) * gRes);
+  M5.Lcd.printf("%.2f   %.2f   %.2f    ", gX, gY, gZ);
+  M5.Lcd.setCursor(140, 30);
+  M5.Lcd.print("*/s");
   M5.Lcd.setCursor(0, 40);
   M5.Lcd.printf("%.2f   %.2f   %.2f     ",((float) accX) * aRes,((float) accY) * aRes, ((float) accZ) * aRes);
-  M5.Lcd.setCursor(140, 40);
-  M5.Lcd.print("*/s");
-  M5.Lcd.setCursor(0, 50);
+  M5.Lcd.setCursor(144, 40);
+  M5.Lcd.print("mg");
+  /*M5.Lcd.setCursor(0, 50);
   M5.Lcd.print("Analog: ");
   M5.Lcd.print((int)analogSensorValue);
   M5.Lcd.print("   ");
   M5.Lcd.setCursor(75, 50);
-  M5.Lcd.print(" / 4095");
+  M5.Lcd.print(" / 4095"); */
+  M5.Lcd.setCursor(0, 50);
+  M5.Lcd.printf("%.2f   %.2f   %.2f    ", pitch, roll, yaw);
   M5.Lcd.setCursor(0, 60);
   M5.Lcd.printf("Turbo Mode: %s", turboModeActive ? "enabled\t" : "disabled\t");
- // M5.Lcd.printf("vbat:%.3fV",vbat);
-  //if (isCharging){
-    //M5.Lcd.print(" Charging      ");
- // }
-  //else if (isDischarging){
-    //M5.Lcd.print(" Discharging   ");
-  //}
-  //else if (!isDischarging && !isCharging){
-    //M5.Lcd.print(" External Power");
-  //}
+ 
   M5.Lcd.setCursor(0, 70);
+  M5.Lcd.printf("Battery Charge:\t%.3fV",vbat);
+ 
   //M5.Lcd.printf("Temperature : %.2f C",((float) temp) / 333.87 + 21.0);
-  M5.Lcd.printf("Output UDP Port: %i", udpPort);
+  
 }
 
 
@@ -653,6 +657,15 @@ void HandleNetwork(){
     gyroRes.send(udp);
     udp.endPacket(); // mark the end of the OSC Packet
     gyroRes.empty();
+
+    OSCMessage rotation("/rotation");
+    rotation.add(pitch);
+    rotation.add(roll);
+    rotation.add(yaw);
+    udp.beginPacket(targetIP, udpPort);
+    rotation.send(udp);
+    udp.endPacket();
+    rotation.empty();
 
   //  OSCMessage oscM5AnalogMsg("/m5Analog"); // First argument is OSC address
    // oscM5AnalogMsg.add((int)analogSensorValue); // Then append the data
@@ -730,7 +743,7 @@ void attemptToConnect() {
 
 void setIPAddress(char* buf, int count, int idx){
   if(count >= 11) {
-  if(targetIP != udpAddress && targetIP != NULL) {
+  if(targetIP != NULL) {
     free(targetIP);
   }
   
@@ -977,6 +990,10 @@ void loop() {
   } else {
    //this else block intentionally left blank
   }
+
+  chargeCheck++;
+
+  chargeCheck = chargeCheck % 8;
    
   if (turboModeActive){
     // No delay
