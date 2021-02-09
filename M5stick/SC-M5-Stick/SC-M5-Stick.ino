@@ -29,9 +29,9 @@
  
 #include <M5StickC.h>
 #include <WiFi.h>
-#include <WiFiUdp.h>
-#include <OSCMessage.h>
-#include <EEPROM.h>
+#include <WiFiUdp.h>      //creating sockets for sending data
+#include <OSCMessage.h>   //for sending data in a structured packet via UDP
+#include <EEPROM.h>       //for storing configuration settings on device
 
 //EEPROM data offsets
 #define UUIDIDX 0
@@ -934,47 +934,51 @@ void loop() {
     if(count >= 3) {
       int cmd = 0;
       int i = 0;
+      //sum up the first 3 characters of the input
       while(i < 3){
         char c = buf[i];
         putchar(toupper(c));
         cmd += c;
         i++;
       }
-  
+
+      //parse the sum of the first 3 characters to find the appropriate function
+      //all functions that take input require a space between the command and
+      //the data parameters
       USE_SERIAL.println(cmd);
       switch(cmd) {
-        case 235: //Incoming Password
+        case 235: //Incoming Password (PWD <Password String>)
           copyPassword(buf, count, 4);
           break;
-        case 226: //Incoming Network Name
+        case 226: //Incoming Network Name (UID <Network Name String>)
           copyUUID(buf, count, 4);
           break;
-        case 229: //Life Check Ping
+        case 229: //Life Check Ping (PNG)
           USE_SERIAL.write(1);
           M5.Lcd.fillScreen(RED);
           break;
-        case 233: //Attempt To Connect
+        case 233: //Attempt To Connect (ATT)
           attemptToConnect();
           break;
-        case 218: //Target IP Address
+        case 218: //Target IP Address (IPA <IP Address String>)
           setIPAddress(buf, count, 4);
           break;
-        case 246: //Target Port
+        case 246: //Target Port (PRT <Port# / 255><Port# % 255>)
           setPort(buf, count, 4);
           break;
-        case 238: //set local port
+        case 238: //set local port (LPT <Port# / 255><Port# % 255>)
           setLocalPort(buf, count, 4);
           break;
-        case 231: //Display Settings
+        case 231: //Display Settings (DSP)
           printEEPROM();
           break;
-        case 234: //Save Settings to EEPROM
+        case 234: //Save Settings to EEPROM (SAV)
           storeToEEPROM();
           break;
-        case 225: //Clear data from EEPROM
+        case 225: //Clear data from EEPROM (CLR)
           clearEEPROM();
           break;
-        case 232: //Turbo mode
+        case 232: //Turbo mode (TRB (0|1))
           setTurboMode(buf, count, 4);
           break; 
         default: //Anything Else
@@ -990,10 +994,6 @@ void loop() {
   } else {
    //this else block intentionally left blank
   }
-
-  chargeCheck++;
-
-  chargeCheck = chargeCheck % 8;
    
   if (turboModeActive){
     // No delay
