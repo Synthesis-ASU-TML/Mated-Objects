@@ -4,7 +4,7 @@
 
 Andrew Robinson has provided a PDF detailing how to setup and configure the M5 Stick devices for operation with the designated Media Choreography applications.
 
-<embed src="https://synthesis-asu-tml.github.io/Mated-Objects/M5%20Stick%20Setup%20Guide.pdf" type="application/pdf" />
+<iframe src="https://synthesis-asu-tml.github.io/Mated-Objects/M5%20Stick%20Setup%20Guide.pdf" width="400px" height=600px" />
 
 <a href="https://synthesis-asu-tml.github.io/Mated-Objects/M5%20Stick%20Setup%20Guide.pdf" target="_blank">Setup Guide</a>
 
