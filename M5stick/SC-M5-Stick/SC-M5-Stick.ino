@@ -77,6 +77,7 @@ double fXg, fYg, fZg;
 const float alpha = 0.5;
 double Xg, Yg, Zg;
 float gRes, aRes;
+bool buttonState = false;
 
 int analogSensorValue;
 int16_t temp = 0;
@@ -435,35 +436,28 @@ void HandleButtons(){
     }
   }
 
+  buttonState = (digitalRead(M5_BUTTON_HOME) == LOW) ? true : false;
   // CENTER FACE BUTTON
   if(digitalRead(M5_BUTTON_HOME) == LOW){
-    //USE_SERIAL.print("Button press CENTER FACE BUTTON");
+   /* //USE_SERIAL.print("Button press CENTER FACE BUTTON");
     M5.Lcd.fillScreen(WHITE);
     unsigned long pressTime  = millis();
     while(digitalRead(M5_BUTTON_HOME) == LOW);
     if (millis() > pressTime + 500){
-      USE_SERIAL.println(" - LONG");
-      M5.Lcd.fillScreen(RED);
-      // Run action
-      M5.Lcd.fillScreen(BLUE);
-      delay(400);
-      M5.Lcd.fillScreen(BLACK);
-    }
-    else{
-      //USE_SERIAL.println(" - SHORT");
-      M5.Lcd.fillScreen(RED);
-      // Run action
-      // Set the display's brightness
-      screenBrightness += 7;
+       screenBrightness += 2;
       if (screenBrightness >= 16){
         screenBrightness = 0;
       }
       M5.Axp.ScreenBreath(screenBrightness);
      
       M5.Lcd.fillScreen(ORANGE);
-      delay(400);
       M5.Lcd.fillScreen(BLACK);
     }
+    else{
+      buttonState = !buttonState;
+    }
+    */
+    
   }
 }
 
@@ -666,6 +660,13 @@ void HandleNetwork(){
     rotation.send(udp);
     udp.endPacket();
     rotation.empty();
+
+    OSCMessage buttonmsg("/button");
+    buttonmsg.add((buttonState) ? 1 : 0);
+    udp.beginPacket(targetIP, udpPort);
+    buttonmsg.send(udp);
+    udp.endPacket();
+    buttonmsg.empty();
 
   //  OSCMessage oscM5AnalogMsg("/m5Analog"); // First argument is OSC address
    // oscM5AnalogMsg.add((int)analogSensorValue); // Then append the data
