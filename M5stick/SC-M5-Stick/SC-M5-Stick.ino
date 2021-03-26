@@ -123,8 +123,9 @@ void WiFiEvent(WiFiEvent_t event){
     switch(event) {
       case SYSTEM_EVENT_STA_GOT_IP:
           //When connected set
-          USE_SERIAL.print("WiFi connected! IP address: ");
+          USE_SERIAL.println("WiFi connected! IP address: ");
           USE_SERIAL.println(WiFi.localIP()); 
+          USE_SERIAL.println("att 1");
           //initializes the UDP state
           //This initializes the transfer buffer
           udp.begin(WiFi.localIP(),localPort);
@@ -133,6 +134,7 @@ void WiFiEvent(WiFiEvent_t event){
       case SYSTEM_EVENT_STA_DISCONNECTED:
           //USE_SERIAL.println("WiFi lost connection");
           connected = false;
+          USE_SERIAL.println("att 0");
           break;
       case SYSTEM_EVENT_WIFI_READY:
           break;
@@ -696,18 +698,17 @@ void copyPassword(char* buf, int count, int idx){
 
     char* tmp = buf;
     tmp += idx;
-    USE_SERIAL.print("Data Size: ");
-    USE_SERIAL.println(sizeof(char) * bsize);
     memcpy(myPWD, tmp, (bsize - 1));
     tmp = (char*)myPWD + (bsize - 1);
     *tmp = 0;
-    USE_SERIAL.print("New Password: ");
-    USE_SERIAL.print((char*)myPWD);
-    USE_SERIAL.println();
+
+    //send back operation result
+    USE_SERIAL.print("pwd 1");
     
   }
   else {
-    USE_SERIAL.println("e2");
+    //send back operation result
+    USE_SERIAL.println("pwd 0");
   }
 }
 
@@ -721,24 +722,23 @@ void copyUUID(char* buf, int count, int idx){
 
     char* tmp = buf;
     tmp += idx;
-    USE_SERIAL.print("Data Size: ");
-    USE_SERIAL.println(sizeof(char) * bsize);
     memcpy(myUUID, tmp, (bsize - 1));
     tmp = (char*)myUUID + (bsize - 1);
     *tmp = 0;
-    USE_SERIAL.print("New Network: ");
-    USE_SERIAL.print((char*)myUUID);
-    USE_SERIAL.println();
-    
+    //send back operation result
+    USE_SERIAL.println("uuid 1");
   }
   else {
-    USE_SERIAL.println("e2");
+    //send back operation result
+    USE_SERIAL.println("uuid 0");
   }
 }
 
 void attemptToConnect() {
   if(myPWD != NULL && myUUID != NULL) {
     reconnectToWiFi((char*)myUUID, (char*)myPWD);
+  } else {
+    USE_SERIAL.println("att 0");
   }
 }
 
@@ -756,11 +756,11 @@ void setIPAddress(char* buf, int count, int idx){
   tmp = targetIP + (bsize - 1);
   *tmp = 0;
 
-  USE_SERIAL.println(targetIP);
+  USE_SERIAL.println("ipa 1");
   M5.Lcd.fillScreen(BLACK);
   }
   else {
-    USE_SERIAL.println("e5"); 
+    USE_SERIAL.println("ipa 0"); 
   }
 }
 
@@ -774,10 +774,11 @@ void setPort(char* buf, int count, int idx) {
     }
 
     udpPort = (carry * 255) + rem;
+    USE_SERIAL.println("prt 1");
     M5.Lcd.fillScreen(BLACK);
   }
   else {
-    USE_SERIAL.println("e6");
+    USE_SERIAL.println("prt 0");
   }
 }
 
@@ -785,10 +786,9 @@ void setTurboMode(char* buf, int count, int idx) {
 
   //no args required, just toggle it.
   turboModeActive = !turboModeActive;
-   
-  USE_SERIAL.print("Turbo Mode: ");
-  USE_SERIAL.print(turboModeActive);
-  USE_SERIAL.println();
+
+  USE_SERIAL.printf("trb %i", ((turboModeActive) ? 1 : 0));
+  
   M5.Lcd.fillScreen(BLACK);
 
 }
@@ -803,10 +803,12 @@ void setLocalPort(char* buf, int count, int idx) {
     }
 
     localPort = (carry * 255) + rem;
+
+    USE_SERIAL.println("lpt 1");
     M5.Lcd.fillScreen(BLACK);
   }
   else {
-    USE_SERIAL.println("e6");
+    USE_SERIAL.println("lpt 0");
   }
 }
 
@@ -871,14 +873,16 @@ void storeToEEPROM() {
     EEPROM.write(71, lport[1]);  
 
     uint8_t turbo = (turboModeActive) ? 1 : 0;
-    USE_SERIAL.printf("Saving Turbo Mode: %d\n", turbo);
+    //USE_SERIAL.printf("Saving Turbo Mode: %d\n", turbo);
     EEPROM.write(72, turbo);
 
     EEPROM.commit();
     EEPROM.end();
+
+    USE_SERIAL.println("sav 1");
     
   } else {
-    USE_SERIAL.println("e10");
+    USE_SERIAL.println("sav 0");
   }
 }
 
@@ -889,6 +893,7 @@ void clearEEPROM() {
   }
   EEPROM.commit();
   EEPROM.end();
+  USE_SERIAL.println("clr 1");
 }
 
 
@@ -946,7 +951,7 @@ void loop() {
       //parse the sum of the first 3 characters to find the appropriate function
       //all functions that take input require a space between the command and
       //the data parameters
-      USE_SERIAL.println(cmd);
+      //USE_SERIAL.println(cmd);
       switch(cmd) {
         case 235: //Incoming Password (PWD <Password String>)
           copyPassword(buf, count, 4);
