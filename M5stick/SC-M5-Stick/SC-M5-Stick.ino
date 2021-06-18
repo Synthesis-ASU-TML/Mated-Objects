@@ -753,11 +753,11 @@ void displayNetwork() {
   if(!usingSoftAP) {
     IPAddress myIP = WiFi.localIP();
     M5.Lcd.setCursor(0,20);
-    M5.Lcd.printf("My IP:\n %i.%i.%i.%i:%i", myIP[0], myIP[1], myIP[2], myIP[3], localPort);
+    M5.Lcd.printf("My IP:\n %i.%i.%i.%i", myIP[0], myIP[1], myIP[2], myIP[3]);
   } else {
     IPAddress myIP = WiFi.softAPIP();
     M5.Lcd.setCursor(0,20);
-    M5.Lcd.printf("My IP:\n %i.%i.%i.%i:%i", myIP[0], myIP[1], myIP[2], myIP[3], localPort);
+    M5.Lcd.printf("My IP:\n %i.%i.%i.%i", myIP[0], myIP[1], myIP[2], myIP[3]);
   }
 
   M5.Lcd.setCursor(0,40);
