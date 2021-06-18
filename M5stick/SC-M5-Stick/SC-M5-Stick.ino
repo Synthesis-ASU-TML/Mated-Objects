@@ -32,6 +32,7 @@
 #include <WiFiUdp.h>      //creating sockets for sending data
 #include <OSCMessage.h>   //for sending data in a structured packet via UDP
 #include <EEPROM.h>       //for storing configuration settings on device
+#include <WebServer.h>
 
 //EEPROM data offsets
 #define UUIDIDX 0
@@ -45,8 +46,20 @@
 void* myPWD;
 void* myUUID;
 
+//Used when the device swaps into SoftAP mode to handle configuration
+const char* defaultSSID = "M5Stick-C_AP-EEA8";
+const char* defaultPWD = "";
+IPAddress myServerIP(192, 168, 1, 1);
+IPAddress serverGateway(192, 168, 1, 1);
+IPAddress serverSubnet(255, 255, 255, 0);
+WebServer myServer(80);
+bool usingSoftAP = false;
+int wifiConnectionLoops = 0;
+const int maxConnectionLoops = 1000;
 
 int nonTurboRefreshDelay = 40;
+
+//Variables for handling normal networing environment
 //default output port
 int udpPort = 8001;
 //default input port
@@ -334,6 +347,247 @@ void readLocalPort() {
   memcpy(&localPort, port, 4);
 }
 
+
+/*=======================SOFT ACCESS POINT CONFIGURATION SERVER===================*/
+
+bool validNumberString(String s) {
+  const char* contents = s.c_str();
+  const char* c = contents;
+  for(int i = 0; i < s.length(); i++, c++) {
+    if(*c > 57 || *c < 48) {
+      return false;
+    }
+  }
+  return true;
+}
+
+//creating HTML source for configuration pages
+String createMenuHTML(int saveStatus, int eraseStatus) {
+  String html = "<!DCOTYPE html>\n<html>\n";
+  html += "<head>\n\t<style>\n\t\tbody  {background-color: powderblue;}\n\t\th1    {color: black}\n\t\tp    {color: black}\n\t\tbutton    {max-width: 100%}\n\t</style>\n</head>\n";
+  html += "<body>\n";
+  html += "\t<h1>M5Stick-C Configuration Menu</h1>\n";
+  html += "\t<form method=\"get\" action=\"/configwifi\">\n\t\t<input class=\"button\" type=\"submit\" name=\"\" value=\"Open WiFi Menu\" style=\"font-size:150%; width:300px; height: 80px;\">\n\t</form>\n";
+  html += "\t<form method=\"get\" action=\"/targetsettings\">\n\t\t<input class=\"button\" type=\"submit\" name=\"\" value=\"Open OSC Menu\" style=\"font-size:150%; width:300px; height: 80px;\">\n\t</form>\n";
+  html += "\t<form method=\"post\" action=\"/savesettings\">\n\t\t<input class=\"button\" type=\"submit\" name=\"\" value=\"Save Settings\" style=\"font-size:150%; width:300px; height: 80px;\">\n\t</form>\n";
+  html += "\t<form method=\"post\" action=\"/clearsettings\">\n\t\t<input class=\"button\" type=\"submit\" name=\"\" value=\"Erase Settings\" style=\"font-size:150%; width:300px; height: 80px;\">\n\t</form>\n";
+  //html += "\t<form method=\"post\" action=\"/restartdevice\">\n\t\t<input class=\"button\" type=\"submit\" name=\"\" value=\"Reboot M5Stick-C\" style=\"font-size:150%; width:300px; height: 80px;\">\n\t</form>\n";
+  if(saveStatus == 1) {
+    html += "\t<p style=\"font-size:150%; color:green;\">Settings sucessfully saved</p>\n";
+  } else if(saveStatus == 0) {
+    html += "\t<p style=\"font-size:150%; color:tomato;\">Error saving settings</p>\n";
+  }
+  if(eraseStatus == 1) {
+    html += "\t<p style=\"font-size:150%; color:green;\">Settings sucessfully erased</p>\n";
+  } else if(eraseStatus == 0) {
+    html += "\t<p style=\"font-size:150%; color:tomato;\">Error erasing settings</p>\n";
+  }
+  html += "</body>\n</html>";
+  return html;
+}
+
+String createOSCMenuHTML(int o1, int o2, int o3, int o4, int port, int iStatus, int pStatus) {
+  String html = "<!DOCTYPE html>\n<html>\n";
+  html += "<head>\n\t<style>\n\t\tbody {background-color: powderblue;}\n\t\th1 {color: black; font-size:150%;}\n\t\tp {font-size:150%;}\n\t</style>\n</head>\n";
+  html += "<body>\n";
+  html += "\t<h1> M5Stick-C OSC Output Settings</h1>\n";
+  html += "\t<form method=\"post\" action=\"/configosc\">\n\t\t<p>Target IP Address</p>\n\t\t<div style=\"display:inline-block\">\n\t\t\t<input class=\"number\" id=\"ip01\" name=\"ip01\" value=\"";
+  html += o1;
+  html += "\" min=\"1\" max=\"255\" style=\"font-size:150%; width:80px; height:80px;\">\n";
+  html += "\t\t\t<input class=\"number\" id=\"ip02\" name=\"ip02\" value=\"";
+  html += o2;
+  html += "\" min=\"0\" max=\"255\" style=\"font-size:150%; width:80px; height:80px;\">\n";
+  html += "\t\t\t<input class=\"number\" id=\"ip03\" name=\"ip03\" value=\"";
+  html += o3;
+  html += "\" min=\"0\" max=\"255\" style=\"font-size:150%; width:80px; height:80px;\">\n";
+  html += "\t\t\t<input class=\"number\" id=\"ip04\" name=\"ip04\" value=\"";
+  html += o4;
+  html += "\" min=\"1\" max=\"255\" style=\"font-size:150%; width:80px; height:80px;\">\n\t\t</div>\n";
+  html += "\t\t<p>Output Port</p>\n\t\t<input class=\"number\" id=\"port\" name=\"port\" min=\"1000\" max=\"65535\" value=\"";
+  html += port;
+  html += "\"style=\"font-size:150%; width:100px; height:80px;\">\n\t\t<div>\n\t\t\t<input class=\"button\" type=\"submit\" value=\"Update Output Settings\" name=\"\" style=\"font-size:150%; width:300px; height:80px;\">\n\t\t</div>\n\t</form>\n";
+  html += "\t<form method=\"get\" action=\"/\">\n\t\t<input class=\"button\" type=\"submit\" value=\"Back to Main Menu\" name=\"\" style=\"font-size:150%; width:300px; height:80px;\">\n\t</form>\n";
+  if(iStatus == 0) {
+    html += "\t<p style=\"color:tomato;\">Bad Values for Target IP Address</p>\n";
+  } else if(iStatus == 1) {
+    html += "\t<p style=\"color:green;\">Target IP Address updated sucessfully</p>\n";
+  }
+  if(pStatus == 0) {
+    html += "\t<p style=\"color:tomato;\">Bad value for output port</p>\n";
+  } else if(pStatus == 1) {
+    html += "\t<p style=\"color:green;\">Output port sucessfully updated</p>\n";
+  }
+  html += "</body>\n</html>";
+  return html;
+  
+}
+
+String createWiFiHTML(int status) {
+  char* nname = (char*)myUUID;
+  String networkname(nname);
+  String html = "<!DOCTYPE html>\n<html>\n";
+  html += "<head>\n    <meta charset = \"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>M5Stick-C Configuration</title>\n</head>\n\n";
+  html += "<body>\n    <div class=\"config-box\">\n        <form method=\"post\" action=\"/setwifi\">\n            <div class=\"textbox\">\n                <input type=\"text\" placeholder=\"Network Name\" name=\"networkName\" value=\"";
+  html += networkname;
+  html += "\" style=\"font-size:150%; width:300px; height: 80px;\">\n            </div>\n";
+  html += "            <div class=\"textbox\">\n                <input type=\"password\" placeholder=\"Network Password\" name=\"networkPassword\" value=\"\" style=\"font-size:150%; width:300px; height: 80px;\">\n            </div>\n";
+  if(status == 0) {
+    html += "            <p style=\"color:tomato;\">Missing Fields!</p>\n";
+  } else if(status == 1) {
+    html += "            <p style=\"color:green;\">Updated network name and password</p>\n";
+  }
+  html += "            <input class=\"button\" type=\"submit\" name=\"\" value=\"Config WiFi\" style=\"font-size:150%; width:300px; height: 80px;\">\n";
+  html += "        </form>\n    </div>\n\t<form method=\"get\" action=\"/\">\n\t\t<input class=\"button\" type=\"submit\" name=\"\" value=\"Back To Menu\" style=\"font-size:150%; width:300px; height: 80px;\">\n\t</form>\n";
+  html += "</body>\n\n</html>";
+  return html;
+}
+
+void initializeSoftAP() {
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setCursor(10, 25);
+  M5.Lcd.print("Unable to connect");
+  M5.Lcd.setCursor(0, 45);
+  M5.Lcd.print("Creating my own WiFi...");
+  WiFi.disconnect();
+  WiFi.softAP(defaultSSID, defaultPWD);
+  delay(2000);
+  WiFi.softAPConfig(myServerIP, serverGateway, serverSubnet);
+  char myuuid[17];
+  memcpy(myuuid, defaultSSID, 17);
+  copyUUID(myuuid, 17, 0);
+  connected = true;
+  usingSoftAP=true;
+  wifiConnectionLoops = 0;
+}
+
+void initializeServer() {
+
+  //handle a user accessing the root menu page
+  myServer.on("/", HTTP_GET, [](){
+    myServer.send(200, "text/html", createMenuHTML(-1, -1));
+  });
+
+  //handle a user asking to modify the WiFi connection settings
+  myServer.on("/configwifi", HTTP_GET, [](){
+    myServer.send(200, "text/html", createWiFiHTML(-1));
+  });
+
+  //handle input from a user that is attempting to modify the WiFi connection settings
+  myServer.on("/setwifi", HTTP_POST, []() {
+   if(myServer.arg("networkName") == "" || myServer.arg("networkPassword") == "") {
+    myServer.send(200, "text/html", createWiFiHTML(0));
+    return;
+   }
+    String uuid = myServer.arg("networkName");
+    String pwd = myServer.arg("networkPassword");
+    Serial.println(uuid);
+    char uuidBuf[30];
+    memcpy(uuidBuf, uuid.c_str(), ((uuid.length() < 30) ? uuid.length() : 30));
+    for(int i = 0; i < ((uuid.length() < 30) ? uuid.length() : 30); i++) {
+      int currChar = uuidBuf[i];
+      //handle apostrophe characters
+      if(currChar == 226 && uuidBuf[i + 1] == 128 && uuidBuf[i + 2] == 153)
+      {
+        uuidBuf[i] = 39;
+        currChar = uuidBuf[i];
+        for(int j = i + 1; j < ((uuid.length() < 30) ? uuid.length() : 30); j++) {
+          if(j + 2 < ((uuid.length() < 30) ? uuid.length() : 30)) {
+            uuidBuf[j] = uuidBuf[j + 2];
+          } else {
+            uuidBuf[j] = 0;
+          }
+        }
+      }
+      Serial.print(currChar);
+      Serial.print(" ");
+    }
+  
+    copyUUID(uuidBuf, ((uuid.length() < 30) ? uuid.length() : 30), 0);
+    
+    Serial.println();
+    Serial.println(pwd);
+    char pwdBuf[30];
+    memcpy(pwdBuf, pwd.c_str(), ((pwd.length() < 30) ? pwd.length() : 30)); 
+    copyPassword(pwdBuf, ((pwd.length() < 30) ? pwd.length() : 30), 0);
+    myServer.send(200, "text/html", createWiFiHTML(1));
+  });
+
+  //handle user asking for the current settings to be saved
+  myServer.on("/savesettings", HTTP_POST, []() {
+    storeToEEPROM();
+    myServer.send(200, "text/html", createMenuHTML(1, -1));
+  });
+
+  //handle user asking for the current settings to be erased
+  myServer.on("/clearsettings", HTTP_POST, []() {
+    clearEEPROM();
+    myServer.send(200, "text/html", createMenuHTML(-1, 1));
+  });
+
+  //handle request for menu to modify OSC target settings
+  myServer.on("/targetsettings", HTTP_GET, []() {
+    IPAddress target;
+    target.fromString(targetIP);
+    myServer.send(200, "text/html", createOSCMenuHTML(target[0], target[1], target[2], target[3], udpPort, -1, -1));
+  });
+
+  myServer.on("/configosc", HTTP_POST, []() {
+    int ip0 = myServer.arg("ip01").toInt();
+    int ip1 = myServer.arg("ip02").toInt();
+    int ip2 = myServer.arg("ip03").toInt();
+    int ip3 = myServer.arg("ip04").toInt();
+    int port = myServer.arg("port").toInt();
+
+    //track if we could suvve
+    int portStore = 0;
+    int ipStore = 0;
+    
+    if(port > 1000 && port <= 65535 && validNumberString(myServer.arg("port"))) {
+      udpPort = port;
+      portStore = 1;
+    } else {
+      portStore = 0;
+    }
+
+    if(validNumberString(myServer.arg("ip01")) && validNumberString(myServer.arg("ip02")) && validNumberString(myServer.arg("ip03")) &&validNumberString(myServer.arg("ip04"))) {
+      String ipaddr = "";
+      ipaddr += ip0;
+      ipaddr += ".";
+      ipaddr += ip1;
+      ipaddr += ".";
+      ipaddr += ip2;
+      ipaddr += ".";
+      ipaddr += ip3;
+
+      char ipstring[15];
+
+      memcpy(ipstring, ipaddr.c_str(),ipaddr.length());
+
+      setIPAddress(ipstring, ipaddr.length(), 0);
+      ipStore = 1;
+    } else {
+      ipStore = 0;
+    }
+
+
+    IPAddress tIP;
+    tIP.fromString(targetIP);
+    myServer.send(200, "text/html", createOSCMenuHTML(tIP[0], tIP[1], tIP[2], tIP[3], udpPort, ipStore, portStore));
+  });
+
+  //handle user asking for device reset
+  myServer.on("/restartdevice", HTTP_POST, []() {
+    if(usingSoftAP) {
+      WiFi.softAPdisconnect();
+    }
+
+    M5.axp.LightSleep(10);
+  });
+  
+  myServer.begin();
+
+}
+
 /////// General Functions //////////////////////////////////////////////////
 
 void setup() {
@@ -370,21 +624,10 @@ void setup() {
   readPWD();
 
   connectToWiFi((char*)myUUID, (char*)myPWD);
-   
+  initializeServer();
   readIP();
   readTargetPort();
   readLocalPort();
-  /*
-  EEPROM.begin(73);
-
-  uint8_t turbo = EEPROM.read(72);
-
-  USE_SERIAL.printf("Read Turbo Value: %d \n", turbo);
-
-  turboModeActive = (turbo > 0) ? true : false;
-
-  EEPROM.end();
- */
 }
 
 
@@ -506,10 +749,16 @@ void displayNetwork() {
 
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.printf("Target IP:\n %s:%i", targetIP, udpPort);
-  
-  IPAddress myIP = WiFi.localIP();
-  M5.Lcd.setCursor(0,20);
-  M5.Lcd.printf("My IP:\n %i.%i.%i.%i:%i", myIP[0], myIP[1], myIP[2], myIP[3], localPort);
+
+  if(!usingSoftAP) {
+    IPAddress myIP = WiFi.localIP();
+    M5.Lcd.setCursor(0,20);
+    M5.Lcd.printf("My IP:\n %i.%i.%i.%i:%i", myIP[0], myIP[1], myIP[2], myIP[3], localPort);
+  } else {
+    IPAddress myIP = WiFi.softAPIP();
+    M5.Lcd.setCursor(0,20);
+    M5.Lcd.printf("My IP:\n %i.%i.%i.%i:%i", myIP[0], myIP[1], myIP[2], myIP[3], localPort);
+  }
 
   M5.Lcd.setCursor(0,40);
   M5.Lcd.print("Network Name:");
@@ -687,7 +936,7 @@ void HandleNetwork(){
 
 
 void copyPassword(char* buf, int count, int idx){
-  if(count > 4) {
+  if(count - idx > 0) {
     if(myPWD != NULL) {
       free(myPWD);
     }
@@ -921,6 +1170,7 @@ void printEEPROM() {
 
 /////// Main Loop //////////////////////////////////////////////////
 void loop() {
+  myServer.handleClient();
   HandleButtons();
   HandleSensors();
   if(dispMode) {
@@ -1000,7 +1250,16 @@ void loop() {
   } else {
    //this else block intentionally left blank
   }
-   
+  
+  if(!usingSoftAP && !connected) {
+    wifiConnectionLoops++;
+    //Serial.printf("Connection Loops: %i\n", wifiConnectionLoops);
+  }
+
+  if(wifiConnectionLoops >= maxConnectionLoops) {
+    initializeSoftAP();
+  }
+  
   if (turboModeActive){
     // No delay
   }
